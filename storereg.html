@@ -1,0 +1,93 @@
+<?php
+// Config
+$githubUsername = "YOUR_GITHUB_USERNAME";
+$repo = "YOUR_REPO_NAME";
+$token = "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN"; // Keep this private
+$filePath = "data/users.json"; // Path inside your repo
+
+// Get form data
+$username = trim($_POST['username']);
+$email = trim($_POST['email']);
+$password = trim($_POST['password']);
+$invite_code = trim($_POST['invite_code']);
+
+// Validation
+if (strlen($username) < 3) {
+    exit("❌ Username must be at least 3 characters.");
+}
+if (strlen($password) < 6) {
+    exit("❌ Password must be at least 6 characters.");
+}
+
+// Step 1: Get existing file content (users.json)
+$apiUrl = "https://api.github.com/repos/$githubUsername/$repo/contents/$filePath";
+$headers = [
+    "Authorization: token $token",
+    "User-Agent: GitHub-User-Reg-App",
+    "Accept: application/vnd.github.v3+json"
+];
+
+$ch = curl_init($apiUrl);
+curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+if ($httpCode == 200) {
+    $data = json_decode($response, true);
+    $existingContent = base64_decode($data['content']);
+    $sha = $data['sha'];
+    $users = json_decode($existingContent, true);
+} else if ($httpCode == 404) {
+    // File doesn't exist, create new
+    $users = [];
+    $sha = null;
+} else {
+    exit("❌ Failed to load user database from GitHub.");
+}
+
+// Check if username or email exists
+foreach ($users as $user) {
+    if ($user['username'] === $username) {
+        exit("❌ Username already exists.");
+    }
+    if ($user['email'] === $email) {
+        exit("❌ Email already registered.");
+    }
+}
+
+// Add new user
+$newUser = [
+    "username" => $username,
+    "email" => $email,
+    "password" => password_hash($password, PASSWORD_DEFAULT),
+    "invite_code" => $invite_code,
+    "registered_at" => date("Y-m-d H:i:s")
+];
+$users[] = $newUser;
+$updatedContent = json_encode($users, JSON_PRETTY_PRINT);
+$base64Content = base64_encode($updatedContent);
+
+// Step 2: Push updated file to GitHub
+$updatePayload = json_encode([
+    "message" => "New user registered: $username",
+    "content" => $base64Content,
+    "sha" => $sha
+]);
+
+$ch = curl_init($apiUrl);
+curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "PUT");
+curl_setopt($ch, CURLOPT_POSTFIELDS, $updatePayload);
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+if ($httpCode == 201 || $httpCode == 200) {
+    echo "✅ Registration Successful<br>➡️ <a href='login.html'>Proceed to login...</a>";
+} else {
+    echo "❌ Failed to save registration to GitHub.";
+}
+?>
